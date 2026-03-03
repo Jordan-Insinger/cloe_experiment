@@ -28,6 +28,8 @@ from cloe_experiment.DNN_Try1 import NeuralNetwork
 import rclpy 
 from rclpy.node import Node
 from std_srvs.srv import Empty
+from geometry_msgs import PoseStamped, TwistStamped
+from mavros_msgs import State, SetMode
 
 class Cloe(Node):
     def __init__(self):
@@ -37,12 +39,31 @@ class Cloe(Node):
         self.initialize_update_law_parameters()
         self.get_offline_data()
 
-        self.start_experiment = False
+        self.initialize_subscribers()
 
+        self.start_experiment = False
+        self.offboard_mode = False
+
+        self.set_mode_client = self.create_client(SetMode, 'set_mode')
         self.start_experiment_srv = self.create_service(
             Empty, 'start_experiment', self.start_experiment_callback) 
 
         self.get_logger().info('Initialized cloe node')
+
+    def initialize_subscribers(self):
+        self.pose_sub = self.create_subscription(
+                PoseStamped, 
+                'autonomy_park/pose', 
+                self.pose_callback, 
+                qos_profile=qos_profile_sensor_data
+        )
+
+        self.vel_sub = self.create_subscription(
+                TwistStamped,
+                'local_position/velocity_local',
+                self.velocity_callback,
+                qos_profile=qos_profile_sensor_data
+        )
 
     def initialize_base_parameters(self):
         # Define Trajectory parameters in a dictionary
@@ -172,6 +193,36 @@ class Cloe(Node):
         self.start_experiment = True
         return response
         
+    async def set_offboard(self):
+        """Set to offboard mode"""
+
+        # Send a few setpoints before starting
+        for i in range(100):
+            self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)
+            await self.sleep(0.05)
+
+        last_request_time = self.get_clock().now()
+
+
+        while rclpy.ok():
+            current_time = self.get_clock().now()
+            
+            if not self.offboard_mode and (current_time - last_request_time).nanoseconds > 2e9:
+                self.get_logger().info("Trying to set OFFBOARD mode...")
+                req = SetMode.Request()
+                req.custom_mode = "OFFBOARD"
+                future = self.set_mode_client.call_async(req)
+                await self.spin_until_future_complete(future)
+                
+                if future.result().mode_sent:
+                    self.get_logger().info("OFFBOARD mode set")
+                    self.offboard_mode = True
+                    return True
+                last_request_time = self.get_clock().now()
+                
+            self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
+            await self.sleep(0.05)
+
     async def sleep(self, seconds: float) -> None:
         """Sleep while still processing callbacks"""
         start = self.get_clock().now()
@@ -180,11 +231,41 @@ class Cloe(Node):
             if (self.get_clock().now() - start).nanoseconds / 1e9 > seconds:
                 break
 
+# Callback functions
+    def pose_callback(self, msg: PoseStamped) -> None:
+        self.position[0] = msg.pose.position.x
+        self.position[1] = msg.pose.position.y
+        self.position[2] = msg.pose.position.z
+
+        quat = msg.pose.orientation
+        siny_cosp = 2 * (quat.w * quat.z + quat.x * quat.y)
+        cosy_cosp = 1 - 2 * (quat.y * quat.y + quat.z * quat.z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+        self.orientation = yaw
+
+    def vel_callback(self, msg:TwistStamped) -> None:
+        self.velocity[0] = msg.twist.linear.x
+        self.velocity[1] = msg.twist.linear.y
+        self.velocity[2] = msg.twist.linear.z
+
     async def run_trajectory(self) -> None:
         while self.start_experiment == False:
             await self.sleep(0.5)
             
         self.get_logger().info("Running Trajectory")
+
+        self.set_offboard() # switch to offboard and run controller
+
+        traj_start_time = self.get_clock().now()
+        while rclpy.ok():
+            # get current time
+            t = (self.get_clock().now - traj_start_time).nanoseconds / 1e9
+
+            # check against final sim time
+
+            # compute control input
+
+            # send command to px4
 
     async def run_experiment(self, sim_params_current) -> None:
         try:

@@ -17,7 +17,6 @@ setup(
     maintainer_email='uflautonomypark@gmail.com',
     description='ros2 python node for cloe experiment',
     license='Apache License 2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
                 'cloe = cloe_experiment.cloe_node:main',
