@@ -104,7 +104,7 @@ class Entity:
             raise ValueError(f"Unknown disturbance type: {disturbance_type}")
         return disturbance
 
-    def update_state(self, i):
+    def update_state(self, i, x, dx):
         # 1. Get state from the PREVIOUS time step (i-1)
         q_prev = self.positions[:, i-1]
         q_dot_prev = self.velocities[:, i-1]
@@ -148,14 +148,18 @@ class Entity:
             d_t = self.disturbance_signal[:, i] # Get the disturbance for the current time step
         
         self.acceleration[:, i] = q_dotdot + d_t
+
         
         
     
         # 4. Update velocity and position for the CURRENT step (i)
         #    - Use the NEW acceleration (q_dotdot)
-        self.velocities[:, i] = q_dot_prev + self.acceleration[:, i] * self.dt
+        #self.velocities[:, i] = q_dot_prev + self.acceleration[:, i] * self.dt
+        self.velocities[:, i] = dx
         #    - Use the NEW velocity to get a more accurate position
-        self.positions[:, i] = q_prev + self.velocities[:, i] * self.dt 
+        #self.positions[:, i] = q_prev + self.velocities[:, i] * self.dt 
+        self.positions[:, i] = x
+        return self.acceleration[:,i], self.positions[:,i], self.velocities[:,i]
         
     
     def update_observer(self, i, qd, qd_dot, qd_ddot):

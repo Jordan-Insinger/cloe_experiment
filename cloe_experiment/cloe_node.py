@@ -16,6 +16,10 @@ import copy
 import os
 import datetime 
 import asyncio
+import time
+import traceback
+import math
+import torch
 
 from cloe_experiment.GeneralDynamics import _duffing_squared_dynamics
 from cloe_experiment.DesiredTrajectories import generate_trajectory
@@ -26,10 +30,12 @@ from cloe_experiment.DNN_Try1 import NeuralNetwork
 
 # ROS2 / PX4 Dependencies
 import rclpy 
-from rclpy.node import Node
+from rclpy.node import Node 
+from rclpy.qos import qos_profile_sensor_data
 from std_srvs.srv import Empty
-from geometry_msgs import PoseStamped, TwistStamped
-from mavros_msgs import State, SetMode
+from geometry_msgs.msg import PoseStamped, TwistStamped
+from mavros_msgs.srv import SetMode
+from mavros_msgs.msg import State, PositionTarget
 
 class Cloe(Node):
     def __init__(self):
@@ -39,16 +45,37 @@ class Cloe(Node):
         self.initialize_update_law_parameters()
         self.get_offline_data()
 
+        self.initialize_states()
+        self.initialize_publishers()
         self.initialize_subscribers()
 
         self.start_experiment = False
         self.offboard_mode = False
+        self.origin_r = 0.6021965548550632 # park rotation
 
         self.set_mode_client = self.create_client(SetMode, 'set_mode')
+
+        while not self.set_mode_client.wait_for_service(timeout_sec=10.0):
+            self.get_logger().info(f'service {self.set_mode_client.srv_name} not available, waiting...')
+
         self.start_experiment_srv = self.create_service(
             Empty, 'start_experiment', self.start_experiment_callback) 
 
         self.get_logger().info('Initialized cloe node')
+
+    def initialize_states(self):
+        self.position = np.zeros(3)
+        self.velocity = np.zeros(3)
+        self.orientation = 0.0
+        self.target_position = np.zeros(3)
+        self.target_velocity = np.zeros(3)
+
+    def initialize_publishers(self):
+            self.accel_pub = self.create_publisher(
+                PositionTarget,
+                'setpoint_raw/local',
+                qos_profile=qos_profile_sensor_data
+            ) 
 
     def initialize_subscribers(self):
         self.pose_sub = self.create_subscription(
@@ -172,9 +199,9 @@ class Cloe(Node):
         offline_training_data_full = None
         try:
             offline_training_data_full = np.loadtxt(offline_data_file_path, delimiter=',', skiprows=1)
-            print(f"Loaded offline data with {offline_training_data_full.shape[0]} points.")
+            self.get_logger().info(f"Loaded offline data with {offline_training_data_full.shape[0]} points.")
         except FileNotFoundError:
-            print(f"Error: Offline data file not found at {offline_data_file_path}")
+            self.get_logger().info(f"Error: Offline data file not found at {offline_data_file_path}")
             # Generate dummy data if the file is not found, for demonstration purposes
             num_dummy_points = 100
             state_size = self.base_sim_params["state_size"]
@@ -182,7 +209,7 @@ class Cloe(Node):
             dummy_offline_q_dot = np.random.rand(num_dummy_points, state_size) * 0.5 - 0.25
             dummy_offline_f_true = np.random.rand(num_dummy_points, state_size) * 10 - 5
             offline_training_data_full = np.hstack((dummy_offline_q, dummy_offline_q_dot, dummy_offline_f_true))
-            print("Using dummy offline data instead.")
+            self.get_logger().info("Using dummy offline data instead.")
 
         offline_training_data_combined = offline_training_data_full
         self.base_sim_params["offline_training_data"] = offline_training_data_combined
@@ -197,9 +224,9 @@ class Cloe(Node):
         """Set to offboard mode"""
 
         # Send a few setpoints before starting
-        for i in range(100):
-            self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)
-            await self.sleep(0.05)
+        for i in range(50):
+            self.send_accel_command(0.0, 0.0, 0.0, 0.0, 0.0)
+            await self.sleep(0.02)
 
         last_request_time = self.get_clock().now()
 
@@ -220,8 +247,50 @@ class Cloe(Node):
                     return True
                 last_request_time = self.get_clock().now()
                 
-            self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
+            self.send_accel_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
             await self.sleep(0.05)
+
+    def send_accel_command(self, accel_x, accel_y, accel_z, yaw=None, yaw_rate=None):
+        """Send acceleration and attitude command to PX4"""
+        msg = PositionTarget()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "base_link"
+        msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+        
+        # Determine which commands to ignore based on what's provided
+        msg.type_mask = PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | \
+                    PositionTarget.IGNORE_PZ | PositionTarget.IGNORE_VX | \
+                    PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ
+        
+        # Add yaw control if provided
+        if yaw is not None:
+            msg.yaw = yaw + self.origin_r
+            msg.type_mask |= PositionTarget.IGNORE_YAW_RATE
+        elif yaw_rate is not None:
+            msg.yaw_rate = yaw_rate
+            msg.type_mask |= PositionTarget.IGNORE_YAW
+        else:
+            # If neither yaw nor yaw_rate provided, ignore both
+            msg.type_mask |= PositionTarget.IGNORE_YAW | PositionTarget.IGNORE_YAW_RATE
+        
+        # Set acceleration values - ensure they're floats
+        accel_enu_x = math.cos(self.origin_r)*accel_x + math.sin(self.origin_r)*accel_y
+        accel_enu_y = -math.sin(self.origin_r)*accel_x + math.cos(self.origin_r)*accel_y
+        
+        # Saturate acceleration
+        msg.acceleration_or_force.x, msg.acceleration_or_force.y, msg.acceleration_or_force.z = saturate_vector(accel_enu_x, accel_enu_y, accel_z, 2.0)
+        
+        # log to check control input
+        #self.get_logger().info(f"ax: {msg.acceleration_or_force.x}, ay: {msg.acceleration_or_force.y}, az: {msg.acceleration_or_force.z}")
+        
+        #self.get_logger().info(f"Sending acceleration command: {msg.acceleration_or_force.x}, {msg.acceleration_or_force.y}, {msg.acceleration_or_force.z}.")
+        self.accel_pub.publish(msg)
+
+    async def spin_until_future_complete(self, future):
+        """Spin until future is complete"""
+        while rclpy.ok() and not future.done():
+            rclpy.spin_once(self, timeout_sec=0.01)
+        return future.result()
 
     async def sleep(self, seconds: float) -> None:
         """Sleep while still processing callbacks"""
@@ -230,10 +299,9 @@ class Cloe(Node):
             rclpy.spin_once(self, timeout_sec=0.01)
             if (self.get_clock().now() - start).nanoseconds / 1e9 > seconds:
                 break
-
 # Callback functions
     def pose_callback(self, msg: PoseStamped) -> None:
-        self.position[0] = msg.pose.position.x
+        self.position[0] = msg.pose.position.x + 27
         self.position[1] = msg.pose.position.y
         self.position[2] = msg.pose.position.z
 
@@ -243,7 +311,7 @@ class Cloe(Node):
         yaw = math.atan2(siny_cosp, cosy_cosp)
         self.orientation = yaw
 
-    def vel_callback(self, msg:TwistStamped) -> None:
+    def velocity_callback(self, msg:TwistStamped) -> None:
         self.velocity[0] = msg.twist.linear.x
         self.velocity[1] = msg.twist.linear.y
         self.velocity[2] = msg.twist.linear.z
@@ -254,18 +322,44 @@ class Cloe(Node):
             
         self.get_logger().info("Running Trajectory")
 
-        self.set_offboard() # switch to offboard and run controller
+        await self.set_offboard() # switch to offboard and run controller
 
         traj_start_time = self.get_clock().now()
+        tf = self.base_sim_params["T_sim"]
+        step = 0
+
         while rclpy.ok():
-            # get current time
-            t = (self.get_clock().now - traj_start_time).nanoseconds / 1e9
+            try:
+                t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
 
-            # check against final sim time
+                if t > tf:
+                    self.get_logger().info(f"Reached final time of {tf} seconds.")
+                    break
 
-            # compute control input
+                #u = self.compute_control_input(t, controller)
+                x = np.array([self.position[0], self.position[1]])
+                x.flatten()
+                dx = np.array([self.velocity[0], self.velocity[1]])
+                dx.flatten()
 
-            # send command to px4
+                u, position, velocity = self.Sys.update_state(step, x, dx)
+                self.get_logger().info(f"Position: {position[0]}, {position[1]}")
+                self.get_logger().info(f"Velocity: {velocity[0]}, {velocity[1]}")
+
+                # Ensure we have float values
+                ax = float(u[0])
+                ay = float(u[1])
+                az = 1.0 # add logig to controller for 3 states
+
+                # Send acceleration commana
+                self.send_accel_command(ax, ay, az, yaw=None, yaw_rate=None)
+
+                step += 1
+                await self.sleep(0.02)
+
+            except Exception as e:
+                self.get_logger().error(f"Error in control loop: {e}")
+                self.get_logger().error(f"Error details: {type(e)}") 
 
     async def run_experiment(self, sim_params_current) -> None:
         try:
@@ -291,7 +385,7 @@ class Cloe(Node):
             # Create NN instance (assuming DNN_Try1.py defines NeuralNetwork)
             nn_instance = NeuralNetwork(initial_nn_input, config=sim_params_current)
             # Create the Entity (system) instance
-            Sys = Entity(config, nn_instance)
+            self.Sys = Entity(config, nn_instance)
 
             # --- Simulation Loop ---
             await self.run_trajectory()
@@ -304,6 +398,29 @@ class Cloe(Node):
         finally:
             self.get_logger().info("Experiment Finished") # Land when done or if interrupted
             # await self.land()
+
+def saturate_vector(vec_x, vec_y, vec_z, max_magnitude):
+    """
+    Saturate a 3D vector while preserving its direction.
+    
+    Args:
+        vec_x, vec_y, vec_z: Vector components
+        max_magnitude: Maximum allowed magnitude
+        
+    Returns:
+        Tuple of saturated (x, y, z) components
+    """
+    # Calculate current magnitude
+    magnitude = math.sqrt(vec_x**2 + vec_y**2 + vec_z**2)
+    
+    # If magnitude exceeds limit, scale the vector down
+    if magnitude > max_magnitude and magnitude > 0:
+        scaling_factor = max_magnitude / magnitude
+        return (vec_x * scaling_factor, 
+                vec_y * scaling_factor, 
+                vec_z * scaling_factor)
+    else:
+        return (vec_x, vec_y, vec_z)
 
 def main(args=None):
     rclpy.init(args=args)

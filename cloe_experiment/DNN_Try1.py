@@ -8,6 +8,7 @@ Created on Wed Jun 11 12:03:18 2025
 import numpy as np
 from cloe_experiment.UpdateLaws import get_weights_dot
 from cloe_experiment.GammaUpdateLaws import get_gamma_dot
+import sys
 
 class NeuralNetwork:
     def __init__(self, nn_input, config):
@@ -144,6 +145,7 @@ class NeuralNetwork:
     def proj(self, Theta, thetaHat, thetaBar):
         max_term = max(0.0, np.dot(thetaHat.T, thetaHat) - thetaBar**2)
         dot_term = np.dot(thetaHat.T, Theta)
+        #print(f"max_term: {max_term}, dot_term: {dot_term}, thetaHat: {thetaHat}", file=sys.stderr)
         numerator = max_term**2 * (dot_term + np.sqrt(dot_term**2 + 1.0)) * thetaHat
         denominator = 2.0 * (1.0 + 2.0 * thetaBar)**2 * thetaBar**2
         return Theta - (numerator / denominator)
