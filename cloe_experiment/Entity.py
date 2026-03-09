@@ -119,7 +119,7 @@ class Entity:
         
         self.weights_history[:, i] = self.nn.weights.flatten()
         self.gamma_history[:, i] = np.diag(self.nn.learning_rate)
-        #self.grad_hist_sum_history[:,:,i] = self.nn.last_grad_hist_sum
+
         # --- NEW: Store Minimum Eigenvalue ---
         current_grad_sum = self.nn.last_grad_hist_sum
         try:
@@ -132,36 +132,13 @@ class Entity:
         except Exception as e:
             print(f"Warning: Error calculating min eigenvalue at step {i}: {e}")
             self.min_eig_grad_hist_sum_history[i] = 0.0
-        # --- END NEW ---
-        
-        # 3. Calculate acceleration by passing the correct inputs to your dynamics function
-        q_dotdot, fx = self.dynamics(q_prev, q_dot_prev, tau)
-        
-        self.fx_history[:, i] = fx # Store true dynamics
-        
-        if self.disturbance_signal is None or i >= self.disturbance_signal.shape[1]:
-            # Handle cases where disturbance isn't set or is too short
-            # For simplicity, if not set, assume zero disturbance
-            d_t = np.zeros(self.config.state_size)
-            print(f"Warning: Disturbance signal not available for step {i}. Using zero disturbance.")
-        else:
-            d_t = self.disturbance_signal[:, i] # Get the disturbance for the current time step
-        
-        self.acceleration[:, i] = q_dotdot + d_t
+    
+        # 3. Update velocity and position for the CURRENT step (i)
 
-        
-        
-    
-        # 4. Update velocity and position for the CURRENT step (i)
-        #    - Use the NEW acceleration (q_dotdot)
-        #self.velocities[:, i] = q_dot_prev + self.acceleration[:, i] * self.dt
         self.velocities[:, i] = dx
-        #    - Use the NEW velocity to get a more accurate position
-        #self.positions[:, i] = q_prev + self.velocities[:, i] * self.dt 
         self.positions[:, i] = x
-        return self.acceleration[:,i], self.positions[:,i], self.velocities[:,i]
-        
-    
+        return self.tau[:,i]    
+
     def update_observer(self, i, qd, qd_dot, qd_ddot):
         # Get current state from the main history arrays at column `i`
         q = self.positions[:, i]

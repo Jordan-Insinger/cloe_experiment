@@ -3,9 +3,9 @@ import numpy as np
 def _circular_trajectory(t, params):
     """Calculates the position, velocity, and acceleration for a circular path."""
     A, f1 = params['A'], params['f1']
-    qd = np.array([A * np.cos(f1 * t), A * np.sin(f1 * t)])
-    qd_dot = np.array([-A * f1 * np.sin(f1 * t), A * f1 * np.cos(f1 * t)])
-    qd_ddot = np.array([-A * f1**2 * np.cos(f1 * t), -A * f1**2 * np.sin(f1 * t)])
+    qd = np.array([A * np.cos(f1 * t)-27.0, A * np.sin(f1 * t), 2.5])
+    qd_dot = np.array([-A * f1 * np.sin(f1 * t), A * f1 * np.cos(f1 * t), 0.0])
+    qd_ddot = np.array([-A * f1**2 * np.cos(f1 * t), -A * f1**2 * np.sin(f1 * t), 0.0])
     return qd, qd_dot, qd_ddot
 
 def _figure_eight_trajectory(t, params):

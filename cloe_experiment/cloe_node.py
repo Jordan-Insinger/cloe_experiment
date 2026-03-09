@@ -33,9 +33,13 @@ import rclpy
 from rclpy.node import Node 
 from rclpy.qos import qos_profile_sensor_data
 from std_srvs.srv import Empty
-from geometry_msgs.msg import PoseStamped, TwistStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped, TransformStamped
 from mavros_msgs.srv import SetMode
 from mavros_msgs.msg import State, PositionTarget
+
+#TF2
+from tf2_ros import TransformBroadcaster
+import tf2_geometry_msgs
 
 class Cloe(Node):
     def __init__(self):
@@ -49,6 +53,9 @@ class Cloe(Node):
         self.initialize_publishers()
         self.initialize_subscribers()
 
+        self.transform_broadcaster = TransformBroadcaster(self)
+
+        self.pose_init_ = False
         self.start_experiment = False
         self.offboard_mode = False
         self.origin_r = 0.6021965548550632 # park rotation
@@ -124,11 +131,11 @@ class Cloe(Node):
 
         # Base simulation parameters - these will be copied and modified for each run
         self.base_sim_params = {
-            "q_init": np.array([7.0472, -0.5236]),
-            "q_dot_init": np.array([0.0,0.0]),
-            "state_size": 2,
-            "num_inputs": 4,
-            "num_outputs": 2,
+            "q_init": np.array([7.0472, -0.5236, 0.0]),
+            "q_dot_init": np.array([0.0,0.0, 0.0]),
+            "state_size": 3,
+            "num_inputs": 6,
+            "num_outputs": 3,
             "num_layers": 4, #4
             "num_neurons": 2, #2
             "activation_functions": ["tanh", "identity"], # previously "tanh", "identity"
@@ -150,9 +157,9 @@ class Cloe(Node):
                     "freqency": 10, #0.5
                 }
             },
-            "delta_hat0": np.zeros(2), # Initial delta_hat value
-            "delta_hat_int0": np.zeros(2), # Initial integral of delta_hat
-            "tau0": np.zeros(2), # Initial control input
+            "delta_hat0": np.zeros(3), # Initial delta_hat value
+            "delta_hat_int0": np.zeros(3), # Initial integral of delta_hat
+            "tau0": np.zeros(3), # Initial control input
         }
 
         self.get_logger().info('Initialized base parameters')
@@ -301,7 +308,10 @@ class Cloe(Node):
                 break
 # Callback functions
     def pose_callback(self, msg: PoseStamped) -> None:
-        self.position[0] = msg.pose.position.x + 27
+        if (not self.pose_init_):
+            self.pose_init_ = True
+
+        self.position[0] = msg.pose.position.x
         self.position[1] = msg.pose.position.y
         self.position[2] = msg.pose.position.z
 
@@ -316,9 +326,13 @@ class Cloe(Node):
         self.velocity[1] = msg.twist.linear.y
         self.velocity[2] = msg.twist.linear.z
 
-    async def run_trajectory(self) -> None:
+    async def run_trajectory(self, config, traj_name) -> None:
         while self.start_experiment == False:
             await self.sleep(0.5)
+            
+        while not self.pose_init_:
+            self.get_logger().info("Agent pose uninitialized, waiting...")
+            await self.sleep(5)
             
         self.get_logger().info("Running Trajectory")
 
@@ -326,30 +340,51 @@ class Cloe(Node):
 
         traj_start_time = self.get_clock().now()
         tf = self.base_sim_params["T_sim"]
-        step = 0
+        step = 1
 
         while rclpy.ok():
             try:
                 t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
 
+                tstep = config.time_steps_array[step-1]
+                qd, qd_dot, qd_ddot = generate_trajectory(traj_name, tstep, self.traj_params[traj_name])
+
+                desired_tf = TransformStamped()
+                desired_tf.header.stamp = self.get_clock().now().to_msg()
+                desired_tf.header.frame_id = "autonomy_park"
+                desired_tf.child_frame_id = "desired_position"
+                desired_tf.transform.translation.x = qd[0]
+                desired_tf.transform.translation.y = qd[1]
+                desired_tf.transform.translation.z = qd[2]
+
+                desired_tf.transform.rotation.x = 0.0
+                desired_tf.transform.rotation.y = 0.0
+                desired_tf.transform.rotation.z = 0.0
+                desired_tf.transform.rotation.w = 1.0
+
+                self.transform_broadcaster.sendTransform(desired_tf);
+
                 if t > tf:
                     self.get_logger().info(f"Reached final time of {tf} seconds.")
                     break
 
-                #u = self.compute_control_input(t, controller)
-                x = np.array([self.position[0], self.position[1]])
+                x = np.array([self.position[0], self.position[1], self.position[2]])
                 x.flatten()
-                dx = np.array([self.velocity[0], self.velocity[1]])
+                dx = np.array([self.velocity[0], self.velocity[1], self.velocity[2]])
                 dx.flatten()
 
-                u, position, velocity = self.Sys.update_state(step, x, dx)
-                self.get_logger().info(f"Position: {position[0]}, {position[1]}")
-                self.get_logger().info(f"Velocity: {velocity[0]}, {velocity[1]}")
+                #self.get_logger().info(f"position: {self.position[0]}, {self.position[1]}, {self.position[2]}")
+                #self.get_logger().info(f"velocity: {self.velocity[0]}, {self.velocity[1]}, {self.velocity[2]}")
+
+                # returns desired state as well
+                tau = self.Sys.update_state(step, x, dx)
 
                 # Ensure we have float values
-                ax = float(u[0])
-                ay = float(u[1])
-                az = 1.0 # add logig to controller for 3 states
+                ax = float(tau[0])
+                ay = float(tau[1])
+                az = float(tau[2])
+
+                self.get_logger().info(f"tau: {ax}, {ay}, {az}")
 
                 # Send acceleration commana
                 self.send_accel_command(ax, ay, az, yaw=None, yaw_rate=None)
@@ -388,7 +423,7 @@ class Cloe(Node):
             self.Sys = Entity(config, nn_instance)
 
             # --- Simulation Loop ---
-            await self.run_trajectory()
+            await self.run_trajectory(config, traj_name)
 
         except Exception as e:
             self.get_logger().error(f"Error in experiment: {e}")

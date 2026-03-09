@@ -7,7 +7,7 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='cloe_experiment',
-            namespace='agent_1',
+            namespace='astro_sim',
             executable='cloe',
             name='cloe_experiment_node'
         )
