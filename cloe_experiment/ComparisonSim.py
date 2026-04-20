@@ -76,7 +76,7 @@ base_sim_params = {
     "history_window_size": 200,
     "history_update_interval": 5,
     "dynamics_func":_duffing_squared_dynamics,
-    "trajectory_name": 'circular',
+    "trajectory_name": 'figure_eight',
     "trajectory_params": traj_params,
     "disturbance": {
         "enabled": False, # Set to False to run without disturbance
@@ -95,7 +95,7 @@ base_sim_params = {
 }
 
 # Define the path to your offline data file
-offline_data_file_path = r'C:\Users\rebecca.hart\OneDrive\Documents\NCR Research\[20XX_XXX] - Using Offline Learning\Sims\Sims for Dixon Draft V2\SimFiles\offline_data_output\VaryingPositive_trainingRegion_duffingSqd_delta03\offline_data_output_50pts_8_00\offline_predicted_training_data.csv'
+offline_data_file_path = r'/home/jordan/ros2_ws/src/cloe_experiment/predicted_dynamics_fx.csv'
 
 offline_training_data_full = None
 try:

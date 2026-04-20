@@ -156,7 +156,8 @@ class NeuralNetwork:
         law_params = self.config['update_law_params']
         
         # Call the dispatcher to get the rate of change of the weights
-        gamma_dot = get_gamma_dot(law_name, self, law_params, step)
+        gamma_dot = 0.0
+        #gamma_dot = get_gamma_dot(law_name, self, law_params, step)
                
         self.learning_rate += self.time_step_delta * gamma_dot
 

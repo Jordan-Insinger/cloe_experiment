@@ -9,11 +9,20 @@ def _circular_trajectory(t, params):
     return qd, qd_dot, qd_ddot
 
 def _figure_eight_trajectory(t, params):
-    """Calculates the position, velocity, and acceleration for a figure-eight path."""
-    A, B, f1, f2 = params['A'], params['B'], params['f1'], params['f2']
-    qd = np.array([A * np.sin(f1 * t), B * np.sin(f2 * t) * np.cos(f1 * t)])
-    qd_dot = np.array([A * f1 * np.cos(f1 * t), B * (f2 * np.cos(f2 * t) * np.cos(f1 * t) - f1 * np.sin(f2 * t) * np.sin(f1 * t))])
-    qd_ddot = np.array([-A * f1**2 * np.sin(f1 * t), B * (-f2**2 * np.sin(f2 * t) * np.cos(f1 * t) - 2 * f1 * f2 * np.cos(f2 * t) * np.sin(f1 * t) - f1**2 * np.sin(f2 * t) * np.cos(f1 * t))])
+    a = 7.5  # Half-width of the long side (x-direction)
+    b = 3.0
+    omega = 0.15  # rad/s
+    qd = np.array([a * np.sin(omega * t) + np.sin(omega * t), b * np.sin(2.0 * omega * t) + np.sin(omega * t), 3.0])
+    qd_dot = np.array([a * omega * np.cos(omega * t) + omega*np.cos(omega*t), 2 * b * omega * np.cos(2.0 * omega * t) + omega*np.cos(omega*t), 0.0])
+    qd_ddot = np.array([-a * omega**2 * np.sin(omega * t) -omega**2 * np.sin(omega*t), -4 * b * omega**2 * np.sin(2.0 * omega * t) - omega**2 * np.sin(omega*t), 0.0])
+
+
+
+    # """Calculates the position, velocity, and acceleration for a figure-eight path."""
+    # A, B, f1, f2 = params['A'], params['B'], params['f1'], params['f2']
+    # qd = np.array([A * np.sin(f1 * t), B * np.sin(f2 * t) * np.cos(f1 * t), 3.0])
+    # qd_dot = np.array([A * f1 * np.cos(f1 * t), B * (f2 * np.cos(f2 * t) * np.cos(f1 * t) - f1 * np.sin(f2 * t) * np.sin(f1 * t)), 0.0])
+    # qd_ddot = np.array([-A * f1**2 * np.sin(f1 * t), B * (-f2**2 * np.sin(f2 * t) * np.cos(f1 * t) - 2 * f1 * f2 * np.cos(f2 * t) * np.sin(f1 * t) - f1**2 * np.sin(f2 * t) * np.cos(f1 * t)) ,0.0])
     return qd, qd_dot, qd_ddot
 
 def _multi_sinusoid_trajectory(t, params):

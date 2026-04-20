@@ -109,8 +109,8 @@ class Cloe(Node):
             'figure_eight': {
                 'A': 8, #10, 0.7
                 'B': 8, #10, 0.7
-                'f1': np.pi / 16, #np.pi/4
-                'f2': np.pi / (16*np.sqrt(2)), #np.pi/4
+                'f1': np.pi / 8, #np.pi/4
+                'f2': np.pi / (8*np.sqrt(2)), #np.pi/4
             },
             'multi_sinusoid': {
                 'A': 0.7,
@@ -140,12 +140,12 @@ class Cloe(Node):
             "num_neurons": 2, #2
             "activation_functions": ["tanh", "identity"], # previously "tanh", "identity"
             "T_sim": 100,
-            "dt": 0.01,
+            "dt": 0.05,
             "settling_time": 3.0,
             "history_window_size": 200,
             "history_update_interval": 5,
             "dynamics_func":_duffing_squared_dynamics,
-            "trajectory_name": 'circular',
+            "trajectory_name": 'figure_eight',
             "trajectory_params": self.traj_params,
             "disturbance": {
                 "enabled": False, # Set to False to run without disturbance
@@ -156,7 +156,7 @@ class Cloe(Node):
                     "amplitude": 1,
                     "freqency": 10, #0.5
                 }
-            },
+                },
             "delta_hat0": np.zeros(3), # Initial delta_hat value
             "delta_hat_int0": np.zeros(3), # Initial integral of delta_hat
             "tau0": np.zeros(3), # Initial control input
@@ -173,17 +173,24 @@ class Cloe(Node):
                 "controller_params": {
                     "alpha1": 1, #5 #15
                     "alpha2": 0, #Not USED
-                    "k1": 10, #10 #40
+                    "k1": 1.0, #10 #40
                     "k2": 0,
                     "kDelta": 0,
                     },
                 "update_law_params": {
-                    "gamma": 1, # Overall Learning Gain
-                    "gamma1": 1, # 1000, #\kappa 2 in paper -- convergence of \tilde Y
-                    "gamma2": 0.005, # Sigma Mod
-                    "gamma3": 0.01, # 5 # \gamma_1 in paper -- related to \theta convergence
+                    #"gamma": 1, # Overall Learning Gain
+                    #"gamma1": 1, # 1000, #\kappa 2 in paper -- convergence of \tilde Y
+                    #"gamma2": 0.005, # Sigma Mod
+                    #"gamma3": 0.01, # 5 # \gamma_1 in paper -- related to \theta convergence
+                    #"gamma4": 0.000, # Disturbance Gain #0.0005
+                    #"gamma5": .0001, # \kappa 1 in paper -- Scaling factor for \tilde Y
+                    #"weight_bounds": 10,
+                    "gamma": 0, # Overall Learning Gain
+                    "gamma1": 0, # 1000, #\kappa 2 in paper -- convergence of \tilde Y
+                    "gamma2": 0.000, # Sigma Mod
+                    "gamma3": 0.00, # 5 # \gamma_1 in paper -- related to \theta convergence
                     "gamma4": 0.000, # Disturbance Gain #0.0005
-                    "gamma5": .0001, # \kappa 1 in paper -- Scaling factor for \tilde Y
+                    "gamma5": 0.0000, # \kappa 1 in paper -- Scaling factor for \tilde Y
                     "weight_bounds": 10,
                     
                     #k_1 > 1
@@ -201,7 +208,7 @@ class Cloe(Node):
         self.get_logger().info('Initialized update law parameters')
 
     def get_offline_data(self):
-        offline_data_file_path = r'C:\Users\rebecca.hart\OneDrive\Documents\NCR Research\[20XX_XXX] - Using Offline Learning\Sims\Sims for Dixon Draft V2\SimFiles\offline_data_output\VaryingPositive_trainingRegion_duffingSqd_delta03\offline_data_output_50pts_8_00\offline_predicted_training_data.csv'
+        offline_data_file_path = r'/home/jordan/ros2_ws/src/cloe_experiment/predicted_dynamics_fx.csv'
 
         offline_training_data_full = None
         try:
